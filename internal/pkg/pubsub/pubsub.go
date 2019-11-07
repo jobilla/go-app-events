@@ -14,6 +14,8 @@ func OpenTopic(ctx context.Context, topic string) (*pubsub.Topic, error) {
 	switch provideDriver() {
 	case "gcloud":
 		return NewGCloudTopic(ctx, os.Getenv("GCP_PROJECT"), topic)
+	case "rabbit":
+		return NewRabbitTopic(ctx, topic)
 	case "memory":
 		return NewInMemoryTopic(ctx, topic)
 	}
