@@ -11,7 +11,7 @@ gets passed to the handler. The handler is then expected to run `proto.Unmarshal
 the correct protobuf message type.
 
 ## Installation
-```
+```bash
 go get github.com/jobilla/go-app-events
 ```
 
@@ -24,7 +24,7 @@ For best compatibility, however, we recommend using the Go CDK.
 
 ### Dispatching an app event
 
-```
+```go
 dispatcher := &Dispatcher{
     ctx: context.Background(),
     topic: pubsubTopic,
