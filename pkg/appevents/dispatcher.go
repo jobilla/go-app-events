@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"github.com/golang/protobuf/proto"
+	app_pubsub "github.com/jobilla/go-app-events/internal/pkg/pubsub"
 	"gocloud.dev/pubsub"
 )
 
@@ -23,6 +24,13 @@ type Message interface {
 	// protobuf message, which will be used when sending app
 	// events through this package.
 	StringType() string
+}
+
+func (d *Dispatcher) Bootstrap(topicId string) error {
+	topic, err := app_pubsub.OpenTopic(context.Background(), topic)
+	d.topic = topic
+
+	return err
 }
 
 func (d *Dispatcher) Dispatch(event string, message Message) error {
