@@ -2,6 +2,7 @@ package pubsub
 
 import (
 	"context"
+	"errors"
 	"gocloud.dev/pubsub"
 	"os"
 )
@@ -19,4 +20,6 @@ func OpenTopic(ctx context.Context, topic string) (*pubsub.Topic, error) {
 	case "memory":
 		return NewInMemoryTopic(ctx, topic)
 	}
+
+	return nil, errors.New("invalid driver supplied")
 }
