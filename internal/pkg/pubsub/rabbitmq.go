@@ -10,5 +10,5 @@ import (
 // Create a new topic on RabbitMQ. This requires the environment
 // variable `RABBIT_SERVER_URL` to be set.
 func NewRabbitTopic(ctx context.Context, topic string) (*pubsub.Topic, error) {
-	return pubsub.OpenTopic(ctx, fmt.Sprintf("rabbit://%s",topic))
+	return pubsub.OpenTopic(ctx, fmt.Sprintf("rabbit://%s", topic))
 }

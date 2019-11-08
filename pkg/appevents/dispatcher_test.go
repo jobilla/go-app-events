@@ -8,7 +8,7 @@ import (
 )
 
 type TestTopic struct {
-	t *testing.T
+	t     *testing.T
 	event string
 }
 
@@ -33,9 +33,9 @@ func (t *TestTopic) Send(ctx context.Context, message *pubsub.Message) error {
 
 func TestDispatcher_Dispatch(t *testing.T) {
 	d := &Dispatcher{
-		ctx:   context.Background(),
+		ctx: context.Background(),
 		topic: &TestTopic{
-			t: t,
+			t:     t,
 			event: "test.event",
 		},
 	}

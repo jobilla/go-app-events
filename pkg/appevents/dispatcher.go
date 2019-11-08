@@ -27,7 +27,7 @@ type Message interface {
 }
 
 func (d *Dispatcher) Bootstrap(topicId string) error {
-	topic, err := app_pubsub.OpenTopic(context.Background(), topic)
+	topic, err := app_pubsub.OpenTopic(context.Background(), topicId)
 	d.topic = topic
 
 	return err
