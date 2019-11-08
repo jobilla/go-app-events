@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gocloud.dev/pubsub"
-	"gocloud.dev/pubsub/rabbitpubsub"
+	_ "gocloud.dev/pubsub/rabbitpubsub"
 )
 
 // Create a new topic on RabbitMQ. This requires the environment
