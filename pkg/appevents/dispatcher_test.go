@@ -13,7 +13,7 @@ type TestTopic struct {
 }
 
 func (t *TestTopic) Send(ctx context.Context, message *pubsub.Message) error {
-	if message.Metadata["event"] != t.event {
+	if message.Metadata["event_type"] != t.event {
 		t.t.Errorf("expected event to be %s, got %s", t.event, message.Metadata["event"])
 	}
 

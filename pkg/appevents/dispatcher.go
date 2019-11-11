@@ -51,7 +51,7 @@ func (d *Dispatcher) Dispatch(event string, message Message) error {
 	return d.topic.Send(d.ctx, &pubsub.Message{
 		Body: jsonString,
 		Metadata: map[string]string{
-			"event": event,
+			"event_type": event,
 		},
 		BeforeSend: nil,
 	})
