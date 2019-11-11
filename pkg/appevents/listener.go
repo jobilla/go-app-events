@@ -2,7 +2,6 @@ package appevents
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"gocloud.dev/pubsub"
 )
@@ -14,13 +13,7 @@ type ProtoBody struct {
 }
 
 func (p *ProtoBody) FromPubsubMessage(message *pubsub.Message) error {
-	body, err := base64.StdEncoding.DecodeString(string(message.Body))
-
-	if err != nil {
-		return err
-	}
-
-	return json.Unmarshal(body, p)
+	return json.Unmarshal(message.Body, p)
 }
 
 type Listener struct {

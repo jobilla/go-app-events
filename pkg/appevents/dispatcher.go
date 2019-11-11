@@ -2,7 +2,6 @@ package appevents
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"github.com/golang/protobuf/proto"
 	app_pubsub "github.com/jobilla/go-app-events/internal/pkg/pubsub"
@@ -49,10 +48,8 @@ func (d *Dispatcher) Dispatch(event string, message Message) error {
 		return err
 	}
 
-	body := []byte(base64.StdEncoding.EncodeToString(jsonString))
-
 	return d.topic.Send(d.ctx, &pubsub.Message{
-		Body: body,
+		Body: jsonString,
 		Metadata: map[string]string{
 			"event": event,
 		},
