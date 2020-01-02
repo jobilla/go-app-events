@@ -22,6 +22,12 @@ type Listener struct {
 	handlers     map[string]AppEventHandler
 }
 
+func (l *Listener) Bootstrap() Listener {
+	l.ctx = context.Background()
+
+	return l
+}
+
 func (l *Listener) RegisterHandlers(handlers map[string]AppEventHandler) {
 	if l.handlers == nil {
 		l.handlers = handlers
