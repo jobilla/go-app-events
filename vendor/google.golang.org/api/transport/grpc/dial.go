@@ -1,16 +1,6 @@
-// Copyright 2015 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2015 Google LLC.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 // Package grpc supports network connections to GRPC servers.
 // This package is not intended for use by end developers. Use the
@@ -39,6 +29,9 @@ import (
 
 // Set at init time by dial_appengine.go. If nil, we're not on App Engine.
 var appengineDialerHook func(context.Context) grpc.DialOption
+
+// Set at init time by dial_socketopt.go. If nil, socketopt is not supported.
+var timeoutDialerOption grpc.DialOption
 
 // Dial returns a GRPC connection for use communicating with a Google cloud
 // service, configured with the given ClientOptions.
@@ -105,22 +98,37 @@ func dial(ctx context.Context, insecure bool, opts []option.ClientOption) (*grpc
 			}
 		}
 	}
+
 	if appengineDialerHook != nil {
 		// Use the Socket API on App Engine.
+		// appengine dialer will override socketopt dialer
 		grpcOpts = append(grpcOpts, appengineDialerHook(ctx))
 	}
+
 	// Add tracing, but before the other options, so that clients can override the
 	// gRPC stats handler.
 	// This assumes that gRPC options are processed in order, left to right.
-	grpcOpts = addOCStatsHandler(grpcOpts)
+	grpcOpts = addOCStatsHandler(grpcOpts, o)
 	grpcOpts = append(grpcOpts, o.GRPCDialOpts...)
 	if o.UserAgent != "" {
 		grpcOpts = append(grpcOpts, grpc.WithUserAgent(o.UserAgent))
 	}
+
+	// TODO(weiranf): This socketopt dialer will be used by default at some
+	// point when isDirectPathEnabled will default to true, we guard it by
+	// the Directpath env var for now once we can introspect user defined
+	// dialer (https://github.com/grpc/grpc-go/issues/2795).
+	if timeoutDialerOption != nil && isDirectPathEnabled(o.Endpoint) {
+		grpcOpts = append(grpcOpts, timeoutDialerOption)
+	}
+
 	return grpc.DialContext(ctx, o.Endpoint, grpcOpts...)
 }
 
-func addOCStatsHandler(opts []grpc.DialOption) []grpc.DialOption {
+func addOCStatsHandler(opts []grpc.DialOption, settings internal.DialSettings) []grpc.DialOption {
+	if settings.TelemetryDisabled {
+		return opts
+	}
 	return append(opts, grpc.WithStatsHandler(&ocgrpc.ClientHandler{}))
 }
 
@@ -141,7 +149,7 @@ func (ts grpcTokenSource) GetRequestMetadata(ctx context.Context, uri ...string)
 		return nil, err
 	}
 
-	// Attach system parameters into the metadata
+	// Attach system parameter
 	if ts.quotaProject != "" {
 		metadata["X-goog-user-project"] = ts.quotaProject
 	}
