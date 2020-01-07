@@ -5,9 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	log "github.com/sirupsen/logrus"
 )
 
-type AppEventHandler func(payload []byte, event string)
+type AppEventHandler func(payload []byte)
 type ProtoBody struct {
 	Payload []byte `json:"payload"`
 	Proto   string `json:"proto"`
@@ -21,10 +22,6 @@ type Listener struct {
 	subscription *pubsub.Subscription
 	ctx          context.Context
 	handlers     map[string]AppEventHandler
-}
-
-func (l *Listener) Bootstrap2() {
-	l.ctx = context.Background()
 }
 
 func (l *Listener) Bootstrap(projectID string, subID string) error {
@@ -52,13 +49,22 @@ func (l *Listener) RegisterHandlers(handlers map[string]AppEventHandler) {
 }
 
 func (l *Listener) Listen() error {
+	log.Debug("Listening for messages...")
 	for {
-		err := l.subscription.Receive(l.ctx, func (ctx context.Context, message *pubsub.Message) {
-			if handler, ok := l.handlers[message.Attributes["event"]]; ok {
+		err := l.subscription.Receive(l.ctx, func(ctx context.Context, message *pubsub.Message) {
+			log.
+				WithContext(ctx).
+				WithField("event_type", message.Attributes["event_type"]).
+				Debug("Message received")
+
+			if handler, ok := l.handlers[message.Attributes["event_type"]]; ok {
 				body := &ProtoBody{}
 				body.FromPubsubMessage(message)
+				handler(body.Payload)
 
-				handler(body.Payload, message.Attributes["event"])
+				log.
+					WithContext(ctx).
+					Debug("Message handled")
 			}
 
 			message.Ack()
