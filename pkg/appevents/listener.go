@@ -62,6 +62,10 @@ func (l *Listener) Listen() error {
 			err = body.FromPubsubMessage(message)
 
 			handler(body.Payload, message.Metadata["event"])
+		} else {
+			log.
+				WithField("event", message.Metadata["event"]).
+				Debug("handler not found")
 		}
 
 		if err != nil {
