@@ -33,7 +33,9 @@ func NewGCloudSubscription(ctx context.Context, project string, topic string, su
 		return nil, cleanup, err
 	}
 
-	_, err = subClient.GetSubscription(ctx, &pubsub2.GetSubscriptionRequest{Subscription: subscription})
+	subscriptionName := fmt.Sprintf("projects/%s/subscriptions/%s", project, subscription)
+
+	_, err = subClient.GetSubscription(ctx, &pubsub2.GetSubscriptionRequest{Subscription: subscriptionName})
 
 	// sub doesn't exist
 	if err != nil {
@@ -42,7 +44,7 @@ func NewGCloudSubscription(ctx context.Context, project string, topic string, su
 			WithField("subscription", subscription).
 			Debug("retrieving subscription failed")
 		_, err = subClient.CreateSubscription(ctx, &pubsub2.Subscription{
-			Name:  fmt.Sprintf("projects/%s/subscriptions/%s", project, subscription),
+			Name:  subscriptionName,
 			Topic: fmt.Sprintf("projects/%s/topics/%s", project, topic),
 		})
 		if err != nil {
