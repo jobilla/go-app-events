@@ -57,14 +57,14 @@ func (l *Listener) Listen() error {
 			WithField("message", string(message.Body)).
 			Debug("received message")
 
-		if handler, ok := l.handlers[message.Metadata["event"]]; ok {
+		if handler, ok := l.handlers[message.Metadata["event_type"]]; ok {
 			body := &ProtoBody{}
 			err = body.FromPubsubMessage(message)
 
-			handler(body.Payload, message.Metadata["event"])
+			handler(body.Payload, message.Metadata["event_type"])
 		} else {
 			log.
-				WithField("event", message.Metadata["event"]).
+				WithField("event", message.Metadata["event_type"]).
 				Debug("handler not found")
 		}
 
