@@ -66,7 +66,5 @@ func (l *Listener) Listen() error {
 		}
 
 		message.Ack()
-
-		return nil
 	}
 }
