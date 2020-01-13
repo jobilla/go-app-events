@@ -52,7 +52,10 @@ func (l *Listener) Listen() error {
 		if err != nil {
 			return err
 		}
-		log.WithField("message", string(message.Body)).Debug("received message")
+		log.
+			WithField("meta", message.Metadata).
+			WithField("message", string(message.Body)).
+			Debug("received message")
 
 		if handler, ok := l.handlers[message.Metadata["event"]]; ok {
 			body := &ProtoBody{}
