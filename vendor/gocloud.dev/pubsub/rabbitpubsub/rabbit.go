@@ -26,7 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"gocloud.dev/gcerrors"
 	"gocloud.dev/pubsub"
 	"gocloud.dev/pubsub/driver"
@@ -41,26 +41,33 @@ func init() {
 // defaultDialer dials a default Rabbit server based on the environment
 // variable "RABBIT_SERVER_URL".
 type defaultDialer struct {
-	init   sync.Once
+	mu     sync.Mutex
+	conn   *amqp.Connection
 	opener *URLOpener
-	err    error
 }
 
 func (o *defaultDialer) defaultConn(ctx context.Context) (*URLOpener, error) {
-	o.init.Do(func() {
-		serverURL := os.Getenv("RABBIT_SERVER_URL")
-		if serverURL == "" {
-			o.err = errors.New("RABBIT_SERVER_URL environment variable not set")
-			return
-		}
-		conn, err := amqp.Dial(serverURL)
-		if err != nil {
-			o.err = fmt.Errorf("failed to dial RABBIT_SERVER_URL %q: %v", serverURL, err)
-			return
-		}
-		o.opener = &URLOpener{Connection: conn}
-	})
-	return o.opener, o.err
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	// Re-use the connection if possible.
+	if o.opener != nil && o.conn != nil && !o.conn.IsClosed() {
+		return o.opener, nil
+	}
+
+	// First time through, or last time resulted in an error, or connection
+	// was closed. Initialize the connection.
+	serverURL := os.Getenv("RABBIT_SERVER_URL")
+	if serverURL == "" {
+		return nil, errors.New("RABBIT_SERVER_URL environment variable not set")
+	}
+	conn, err := amqp.Dial(serverURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial RABBIT_SERVER_URL %q: %v", serverURL, err)
+	}
+	o.conn = conn
+	o.opener = &URLOpener{Connection: conn}
+	return o.opener, nil
 }
 
 func (o *defaultDialer) OpenTopicURL(ctx context.Context, u *url.URL) (*pubsub.Topic, error) {
@@ -259,6 +266,12 @@ func (t *topic) SendBatch(ctx context.Context, ms []*driver.Message) error {
 			cancel()
 			break
 		}
+		if m.AfterSend != nil {
+			asFunc := func(i interface{}) bool { return false }
+			if err := m.AfterSend(asFunc); err != nil {
+				return err
+			}
+		}
 	}
 	// Wait for the goroutine to finish.
 	err := <-errc
@@ -427,8 +440,8 @@ func isRetryable(err error) bool {
 	// But it actually means "can be recovered by retrying later or with different
 	// parameters," which is not what we want. The error codes for which Recover is
 	// true, defined in the isSoftExceptionCode function of
-	// github.com/streadway/amqp/spec091.go, include things like NotFound and
-	// AccessRefused, which require outside action.
+	// https://github.com/rabbitmq/amqp091-go/blob/main/spec091.go, includng things
+	// like NotFound and AccessRefused, which require outside action.
 	//
 	// The following are the codes which might be resolved by retry without external
 	// action, according to the AMQP 0.91 spec
@@ -626,10 +639,18 @@ func toMessage(d amqp.Delivery) *driver.Message {
 	for k, v := range d.Headers {
 		md[k] = fmt.Sprint(v)
 	}
+	loggableID := d.MessageId
+	if loggableID == "" {
+		loggableID = d.CorrelationId
+	}
+	if loggableID == "" {
+		loggableID = fmt.Sprintf("DeliveryTag %d", d.DeliveryTag)
+	}
 	return &driver.Message{
-		Body:     d.Body,
-		AckID:    d.DeliveryTag,
-		Metadata: md,
+		LoggableID: loggableID,
+		Body:       d.Body,
+		AckID:      d.DeliveryTag,
+		Metadata:   md,
 		AsFunc: func(i interface{}) bool {
 			p, ok := i.(*amqp.Delivery)
 			if !ok {

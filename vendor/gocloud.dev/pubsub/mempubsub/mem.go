@@ -19,7 +19,7 @@
 // mempubsub should not be used for production: it is intended for local
 // development and testing.
 //
-// URLs
+// # URLs
 //
 // For pubsub.OpenTopic and pubsub.OpenSubscription, mempubsub registers
 // for the scheme "mem".
@@ -27,14 +27,14 @@
 // see URLOpener.
 // See https://gocloud.dev/concepts/urls/ for background information.
 //
-// Message Delivery Semantics
+// # Message Delivery Semantics
 //
 // mempubsub supports at-least-once semantics; applications must
 // call Message.Ack after processing a message, or it will be redelivered.
 // See https://godoc.org/gocloud.dev/pubsub#hdr-At_most_once_and_At_least_once_Delivery
 // for more background.
 //
-// As
+// # As
 //
 // mempubsub does not support any types for As.
 package mempubsub // import "gocloud.dev/pubsub/mempubsub"
@@ -43,6 +43,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"path"
 	"sync"
@@ -68,7 +69,7 @@ const Scheme = "mem"
 //
 // Query parameters:
 //   - ackdeadline: The ack deadline for OpenSubscription, in time.ParseDuration formats.
-//       Defaults to 1m.
+//     Defaults to 1m.
 type URLOpener struct {
 	mu     sync.Mutex
 	topics map[string]*pubsub.Topic
@@ -146,14 +147,27 @@ func (t *topic) SendBatch(ctx context.Context, ms []*driver.Message) error {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Log a warning if there are no subscribers.
+	if len(t.subs) == 0 {
+		log.Print("warning: message sent to topic with no subscribers")
+	}
+
 	// Associate ack IDs with messages here. It would be a bit better if each subscription's
 	// messages had their own ack IDs, so we could catch one subscription using ack IDs from another,
 	// but that would require copying all the messages.
 	for i, m := range ms {
 		m.AckID = t.nextAckID + i
+		m.LoggableID = fmt.Sprintf("msg #%d", m.AckID)
+		m.AsFunc = func(interface{}) bool { return false }
 
 		if m.BeforeSend != nil {
 			if err := m.BeforeSend(func(interface{}) bool { return false }); err != nil {
+				return err
+			}
+		}
+		if m.AfterSend != nil {
+			if err := m.AfterSend(func(interface{}) bool { return false }); err != nil {
 				return err
 			}
 		}
@@ -239,7 +253,6 @@ func (s *subscription) add(ms []*driver.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, m := range ms {
-		m.AsFunc = func(interface{}) bool { return false }
 		// The new message will expire at the zero time, which means it will be
 		// immediately eligible for delivery.
 		s.msgs[m.AckID] = &message{msg: m}

@@ -61,14 +61,14 @@ var (
 // Server tags are applied to the context used to process each RPC, as well as
 // the measures at the end of each RPC.
 var (
-	KeyServerMethod, _ = tag.NewKey("grpc_server_method")
-	KeyServerStatus, _ = tag.NewKey("grpc_server_status")
+	KeyServerMethod = tag.MustNewKey("grpc_server_method")
+	KeyServerStatus = tag.MustNewKey("grpc_server_status")
 )
 
 // Client tags are applied to measures at the end of each RPC.
 var (
-	KeyClientMethod, _ = tag.NewKey("grpc_client_method")
-	KeyClientStatus, _ = tag.NewKey("grpc_client_status")
+	KeyClientMethod = tag.MustNewKey("grpc_client_method")
+	KeyClientStatus = tag.MustNewKey("grpc_client_status")
 )
 
 var (
@@ -82,8 +82,10 @@ func methodName(fullname string) string {
 // statsHandleRPC processes the RPC events.
 func statsHandleRPC(ctx context.Context, s stats.RPCStats) {
 	switch st := s.(type) {
-	case *stats.Begin, *stats.OutHeader, *stats.InHeader, *stats.InTrailer, *stats.OutTrailer:
+	case *stats.OutHeader, *stats.InHeader, *stats.InTrailer, *stats.OutTrailer:
 		// do nothing for client
+	case *stats.Begin:
+		handleRPCBegin(ctx, st)
 	case *stats.OutPayload:
 		handleRPCOutPayload(ctx, st)
 	case *stats.InPayload:
@@ -92,6 +94,25 @@ func statsHandleRPC(ctx context.Context, s stats.RPCStats) {
 		handleRPCEnd(ctx, st)
 	default:
 		grpclog.Infof("unexpected stats: %T", st)
+	}
+}
+
+func handleRPCBegin(ctx context.Context, s *stats.Begin) {
+	d, ok := ctx.Value(rpcDataKey).(*rpcData)
+	if !ok {
+		if grpclog.V(2) {
+			grpclog.Infoln("Failed to retrieve *rpcData from context.")
+		}
+	}
+
+	if s.IsClient() {
+		ocstats.RecordWithOptions(ctx,
+			ocstats.WithTags(tag.Upsert(KeyClientMethod, methodName(d.method))),
+			ocstats.WithMeasurements(ClientStartedRPCs.M(1)))
+	} else {
+		ocstats.RecordWithOptions(ctx,
+			ocstats.WithTags(tag.Upsert(KeyClientMethod, methodName(d.method))),
+			ocstats.WithMeasurements(ServerStartedRPCs.M(1)))
 	}
 }
 

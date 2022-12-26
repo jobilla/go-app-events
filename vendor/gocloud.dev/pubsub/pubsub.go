@@ -18,8 +18,7 @@
 //
 // See https://gocloud.dev/howto/pubsub/ for a detailed how-to guide.
 //
-//
-// At-most-once and At-least-once Delivery
+// # At-most-once and At-least-once Delivery
 //
 // The semantics of message delivery vary across PubSub services.
 // Some services guarantee that messages received by subscribers but not
@@ -34,22 +33,23 @@
 // documentation for more information about message delivery semantics.
 //
 // After receiving a Message via Subscription.Receive:
-//  - Always call Message.Ack or Message.Nack after processing the message.
-//  - For some drivers, Ack will be a no-op.
-//  - For some drivers, Nack is not supported and will panic; you can call
-//    Message.Nackable to see.
+//   - Always call Message.Ack or Message.Nack after processing the message.
+//   - For some drivers, Ack will be a no-op.
+//   - For some drivers, Nack is not supported and will panic; you can call
+//     Message.Nackable to see.
 //
-// OpenCensus Integration
+// # OpenCensus Integration
 //
 // OpenCensus supports tracing and metric collection for multiple languages and
 // backend providers. See https://opencensus.io.
 //
 // This API collects OpenCensus traces and metrics for the following methods:
-//  - Topic.Send
-//  - Topic.Shutdown
-//  - Subscription.Receive
-//  - Subscription.Shutdown
-//  - The internal driver methods SendBatch, SendAcks and ReceiveBatch.
+//   - Topic.Send
+//   - Topic.Shutdown
+//   - Subscription.Receive
+//   - Subscription.Shutdown
+//   - The internal driver methods SendBatch, SendAcks and ReceiveBatch.
+//
 // All trace and metric names begin with the package import path.
 // The traces add the method name.
 // For example, "gocloud.dev/pubsub/Topic.Send".
@@ -76,19 +76,24 @@ import (
 	"time"
 	"unicode/utf8"
 
-	gax "github.com/googleapis/gax-go"
+	"github.com/googleapis/gax-go/v2"
 	"gocloud.dev/gcerrors"
-	"gocloud.dev/internal/batcher"
 	"gocloud.dev/internal/gcerr"
 	"gocloud.dev/internal/oc"
 	"gocloud.dev/internal/openurl"
 	"gocloud.dev/internal/retry"
+	"gocloud.dev/pubsub/batcher"
 	"gocloud.dev/pubsub/driver"
 	"golang.org/x/sync/errgroup"
 )
 
 // Message contains data to be published.
 type Message struct {
+	// LoggableID will be set to an opaque message identifer for
+	// received messages, useful for debug logging. No assumptions should
+	// be made about the content.
+	LoggableID string
+
 	// Body contains the content of the message.
 	Body []byte
 
@@ -110,6 +115,16 @@ type Message struct {
 	// asFunc converts its argument to driver-specific types.
 	// See https://gocloud.dev/concepts/as/ for background information.
 	BeforeSend func(asFunc func(interface{}) bool) error
+
+	// AfterSend is a callback used when sending a message. It will always be
+	// set to nil for received messages.
+	//
+	// The callback will be called at most once, after the message is sent.
+	// If Send returns an error, AfterSend will not be called.
+	//
+	// asFunc converts its argument to driver-specific types.
+	// See https://gocloud.dev/concepts/as/ for background information.
+	AfterSend func(asFunc func(interface{}) bool) error
 
 	// asFunc invokes driver.Message.AsFunc.
 	asFunc func(interface{}) bool
@@ -232,6 +247,9 @@ func (t *Topic) Send(ctx context.Context, m *Message) (err error) {
 	if err != nil {
 		return err // t.err wrapped when set
 	}
+	if m.LoggableID != "" {
+		return gcerr.Newf(gcerr.InvalidArgument, nil, "pubsub: Message.LoggableID should not be set when sending a message")
+	}
 	for k, v := range m.Metadata {
 		if !utf8.ValidString(k) {
 			return gcerr.Newf(gcerr.InvalidArgument, nil, "pubsub: Message.Metadata keys must be valid UTF-8 strings: %q", k)
@@ -244,6 +262,7 @@ func (t *Topic) Send(ctx context.Context, m *Message) (err error) {
 		Body:       m.Body,
 		Metadata:   m.Metadata,
 		BeforeSend: m.BeforeSend,
+		AfterSend:  m.AfterSend,
 	}
 	return t.batcher.Add(ctx, dm)
 }
@@ -258,7 +277,7 @@ func (t *Topic) Shutdown(ctx context.Context) (err error) {
 
 	t.mu.Lock()
 	if t.err == errTopicShutdown {
-		t.mu.Unlock()
+		defer t.mu.Unlock()
 		return t.err
 	}
 	t.err = errTopicShutdown
@@ -501,15 +520,18 @@ func (s *Subscription) updateBatchSize() int {
 // Receive retries retryable errors from the underlying driver forever.
 // Therefore, if Receive returns an error, either:
 // 1. It is a non-retryable error from the underlying driver, either from
-//    an attempt to fetch more messages or from an attempt to ack messages.
-//    Operator intervention may be required (e.g., invalid resource, quota
-//    error, etc.). Receive will return the same error from then on, so the
-//    application should log the error and either recreate the Subscription,
-//    or exit.
+//
+//	an attempt to fetch more messages or from an attempt to ack messages.
+//	Operator intervention may be required (e.g., invalid resource, quota
+//	error, etc.). Receive will return the same error from then on, so the
+//	application should log the error and either recreate the Subscription,
+//	or exit.
+//
 // 2. The provided ctx is Done. Error() on the returned error will include both
-//    the ctx error and the underlying driver error, and ErrorAs on it
-//    can access the underlying driver error type if needed. Receive may
-//    be called again with a fresh ctx.
+//
+//	the ctx error and the underlying driver error, and ErrorAs on it
+//	can access the underlying driver error type if needed. Receive may
+//	be called again with a fresh ctx.
 //
 // Callers can distinguish between the two by checking if the ctx they passed
 // is Done, or via xerrors.Is(err, context.DeadlineExceeded or context.Canceled)
@@ -560,9 +582,12 @@ func (s *Subscription) Receive(ctx context.Context) (_ *Message, err error) {
 					s.err = err
 				} else if len(msgs) > 0 {
 					s.q = append(s.q, msgs...)
-					if s.throughputStart.IsZero() {
-						s.throughputStart = time.Now()
-					}
+				}
+				// Set the start time for measuring throughput even if we didn't get
+				// any messages; this allows batch size to decay over time if there
+				// aren't any message available.
+				if s.throughputStart.IsZero() {
+					s.throughputStart = time.Now()
 				}
 				close(s.waitc)
 				s.waitc = nil
@@ -580,11 +605,17 @@ func (s *Subscription) Receive(ctx context.Context) (_ *Message, err error) {
 			if len(md) == 0 {
 				md = nil
 			}
+			loggableID := m.LoggableID
+			if loggableID == "" {
+				// This shouldn't happen, but just in case it's better to be explicit.
+				loggableID = "unknown"
+			}
 			m2 := &Message{
-				Body:     m.Body,
-				Metadata: md,
-				asFunc:   m.AsFunc,
-				nackable: s.canNack,
+				LoggableID: loggableID,
+				Body:       m.Body,
+				Metadata:   md,
+				asFunc:     m.AsFunc,
+				nackable:   s.canNack,
 			}
 			m2.ack = func(isAck bool) {
 				// Ignore the error channel. Errors are dealt with
@@ -607,8 +638,8 @@ func (s *Subscription) Receive(ctx context.Context) (_ *Message, err error) {
 			})
 			return m2, nil
 		}
-		// No messages are available.
-		if s.throughputEnd.IsZero() && !s.throughputStart.IsZero() {
+		// No messages are available. Close the interval for throughput measurement.
+		if s.throughputEnd.IsZero() && !s.throughputStart.IsZero() && s.throughputCount > 0 {
 			s.throughputEnd = time.Now()
 		}
 		// A call to ReceiveBatch must be in flight. Wait for it.
@@ -637,13 +668,15 @@ func (s *Subscription) getNextBatch(nMessages int) ([]*driver.Message, error) {
 
 	g, ctx := errgroup.WithContext(s.backgroundCtx)
 	for _, maxMessagesInBatch := range batches {
+		// Make a copy of the loop variable since it will be used by a goroutine.
+		curMaxMessagesInBatch := maxMessagesInBatch
 		g.Go(func() error {
 			var msgs []*driver.Message
 			err := retry.Call(ctx, gax.Backoff{}, s.driver.IsRetryable, func() error {
 				var err error
 				ctx2 := s.tracer.Start(ctx, "driver.Subscription.ReceiveBatch")
 				defer func() { s.tracer.End(ctx2, err) }()
-				msgs, err = s.driver.ReceiveBatch(ctx2, maxMessagesInBatch)
+				msgs, err = s.driver.ReceiveBatch(ctx2, curMaxMessagesInBatch)
 				return err
 			})
 			if err != nil {
@@ -671,7 +704,7 @@ func (s *Subscription) Shutdown(ctx context.Context) (err error) {
 	s.mu.Lock()
 	if s.err == errSubscriptionShutdown {
 		// Already Shutdown.
-		s.mu.Unlock()
+		defer s.mu.Unlock()
 		return s.err
 	}
 	s.err = errSubscriptionShutdown
