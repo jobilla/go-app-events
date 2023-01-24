@@ -3,8 +3,8 @@ package appevents
 import (
 	"context"
 	"encoding/json"
+	"google.golang.org/protobuf/proto"
 
-	"github.com/golang/protobuf/proto"
 	app_pubsub "github.com/jobilla/go-app-events/internal/pkg/pubsub"
 	"gocloud.dev/pubsub"
 )
